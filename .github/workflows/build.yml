@@ -1,0 +1,32 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # 수동 실행 버튼
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: PyInstaller 설치
+        run: pip install pyinstaller
+
+      - name: EXE 빌드
+        run: |
+          pyinstaller --onefile --noconsole --name "카카오톡대화분석기" kakao_parser.py
+
+      - name: 결과물 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: 카카오톡대화분석기
+          path: dist/카카오톡대화분석기.exe
+          retention-days: 30
