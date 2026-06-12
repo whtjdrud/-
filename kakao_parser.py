@@ -429,59 +429,12 @@ HTML = r"""<!DOCTYPE html>
   <div id="dropzone" onclick="document.getElementById('fileInput').click()">
     <div class="icon">📂</div>
     <p><strong>클릭하거나 파일을 끌어다 놓으세요</strong></p>
-    <p>카카오톡 대화 내보내기 텍스트 파일 (.txt)</p>
+    <p>카카오톡 대화 텍스트 파일 (.txt) — 여러 개 한꺼번에 선택 가능</p>
   </div>
-  <input type="file" id="fileInput" accept=".txt">
-
-  <!-- 필터 -->
-  <div class="panel" id="filterPanel" style="display:none">
-    <h2>🔍 검색 필터</h2>
-    <div class="filters">
-      <div class="field">
-        <label>키워드</label>
-        <input id="kw" placeholder="예: OT, 프로모션, 일정" />
-      </div>
-      <div class="field">
-        <label>보낸 사람</label>
-        <input id="senderInput" placeholder="이름 입력 또는 아래 태그 클릭" />
-      </div>
-      <div class="field">
-        <label>시작 날짜 (예: 2024년 3월 1일)</label>
-        <input id="dateFrom" placeholder="2024년 3월 1일" />
-      </div>
-      <div class="field">
-        <label>종료 날짜</label>
-        <input id="dateTo" placeholder="2024년 12월 31일" />
-      </div>
-    </div>
-    <div class="actions">
-      <button class="btn btn-primary" onclick="doSearch()">검색</button>
-      <button class="btn btn-ghost" onclick="clearFilters()">초기화</button>
-      <button class="btn btn-promo" onclick="openPromoPanel()">💰 프모 수당 정리</button>
-    </div>
-  </div>
-
-  <!-- 통계 / 발신자 태그 -->
-  <div id="statsArea" style="display:none">
-    <div class="stats">
-      <div class="stat-card"><div class="num" id="totalCount">0</div><div class="lbl">전체 메시지</div></div>
-      <div class="stat-card"><div class="num" id="resultCount">0</div><div class="lbl">검색 결과</div></div>
-      <div class="stat-card"><div class="num" id="senderCount">0</div><div class="lbl">참여자</div></div>
-      <div class="stat-card"><div class="num" id="dayCount">0</div><div class="lbl">대화 일수</div></div>
-    </div>
-    <div class="senders" id="senderTags"></div>
-    <div class="export-bar">
-      <span>내보내기:</span>
-      <button class="btn btn-ghost" onclick="exportTxt()">📄 TXT</button>
-      <button class="btn btn-ghost" onclick="exportCsv()">📊 CSV</button>
-    </div>
-  </div>
-
-  <div id="synonymHint" style="display:none;margin-bottom:12px;font-size:13px;color:#888;"></div>
+  <input type="file" id="fileInput" accept=".txt" multiple>
   <div id="status"></div>
-  <div id="results"></div>
 
-  <!-- 프모 수당 정리 -->
+  <!-- 프모 수당 정리 (메인) -->
   <div id="promoArea" style="display:none">
     <div class="panel" style="margin-bottom:16px">
       <h2>💰 프모(OT 수당) 정리 — 기간 선택</h2>
@@ -503,7 +456,6 @@ HTML = r"""<!DOCTYPE html>
       </div>
       <div class="actions" style="margin-top:14px">
         <button class="btn btn-primary" onclick="runPromo()">정리하기</button>
-        <button class="btn btn-ghost" onclick="closePromoPanel()">닫기</button>
       </div>
     </div>
 
@@ -516,17 +468,67 @@ HTML = r"""<!DOCTYPE html>
       </div>
 
       <div class="tabs">
-        <button class="tab active" id="tabTable" onclick="switchTab('table')">📋 시간대별</button>
-        <button class="tab" id="tabTimeline" onclick="switchTab('timeline')">📅 날짜별 타임라인</button>
+        <button class="tab active" id="tabTimeline" onclick="switchTab('timeline')">📅 날짜별 타임라인</button>
+        <button class="tab" id="tabTable" onclick="switchTab('table')">📋 시간대별</button>
         <div style="flex:1"></div>
         <button class="btn btn-ghost" onclick="exportPromoCsv()">📊 CSV 내보내기</button>
       </div>
 
-      <div id="viewTable" style="overflow-x:auto">
+      <div id="viewTimeline"></div>
+      <div id="viewTable" style="display:none;overflow-x:auto">
         <table id="promoTable" class="promo-table"></table>
       </div>
-      <div id="viewTimeline" style="display:none"></div>
     </div>
+  </div>
+
+  <!-- 검색 (접이식, 아래) -->
+  <div id="searchToggleWrap" style="display:none;margin-top:24px">
+    <button class="btn btn-ghost" onclick="toggleSearch()" id="searchToggleBtn">🔍 메시지 검색 열기</button>
+  </div>
+
+  <div id="searchSection" style="display:none">
+    <div class="panel" id="filterPanel">
+      <h2>🔍 검색 필터</h2>
+      <div class="filters">
+        <div class="field">
+          <label>키워드</label>
+          <input id="kw" placeholder="예: OT, 프로모션, 일정" />
+        </div>
+        <div class="field">
+          <label>보낸 사람</label>
+          <input id="senderInput" placeholder="이름 입력 또는 아래 태그 클릭" />
+        </div>
+        <div class="field">
+          <label>시작 날짜 (예: 2024년 3월 1일)</label>
+          <input id="dateFrom" placeholder="2024년 3월 1일" />
+        </div>
+        <div class="field">
+          <label>종료 날짜</label>
+          <input id="dateTo" placeholder="2024년 12월 31일" />
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="doSearch()">검색</button>
+        <button class="btn btn-ghost" onclick="clearFilters()">초기화</button>
+      </div>
+    </div>
+
+    <div id="statsArea" style="display:none">
+      <div class="stats">
+        <div class="stat-card"><div class="num" id="totalCount">0</div><div class="lbl">전체 메시지</div></div>
+        <div class="stat-card"><div class="num" id="resultCount">0</div><div class="lbl">검색 결과</div></div>
+        <div class="stat-card"><div class="num" id="senderCount">0</div><div class="lbl">참여자</div></div>
+        <div class="stat-card"><div class="num" id="dayCount">0</div><div class="lbl">대화 일수</div></div>
+      </div>
+      <div class="senders" id="senderTags"></div>
+      <div class="export-bar">
+        <span>내보내기:</span>
+        <button class="btn btn-ghost" onclick="exportTxt()">📄 TXT</button>
+        <button class="btn btn-ghost" onclick="exportCsv()">📊 CSV</button>
+      </div>
+    </div>
+    <div id="synonymHint" style="display:none;margin-bottom:12px;font-size:13px;color:#888;"></div>
+    <div id="results"></div>
   </div>
 </div>
 
@@ -534,43 +536,61 @@ HTML = r"""<!DOCTYPE html>
 let allMessages = [];
 let filteredMessages = [];
 
-// 파일 드롭존
+// 파일 드롭존 (여러 파일 지원)
 const dropzone = document.getElementById('dropzone');
 dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('hover'); });
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('hover'));
 dropzone.addEventListener('drop', e => {
   e.preventDefault(); dropzone.classList.remove('hover');
-  const file = e.dataTransfer.files[0];
-  if (file) loadFile(file);
+  if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
 });
 document.getElementById('fileInput').addEventListener('change', e => {
-  if (e.target.files[0]) loadFile(e.target.files[0]);
+  if (e.target.files.length) loadFiles(e.target.files);
 });
 
-function loadFile(file) {
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const text = ev.target.result;
-    // 서버에 파싱 요청
-    fetch('/parse', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ text })
-    })
-    .then(r => r.json())
-    .then(data => {
-      allMessages = data.messages;
-      filteredMessages = allMessages;
-      document.getElementById('filterPanel').style.display = '';
-      document.getElementById('statsArea').style.display = '';
-      renderSenderTags();
-      updateStats();
-      renderResults(allMessages);
-      document.getElementById('status').textContent =
-        `✅ "${file.name}" 로드 완료 — ${allMessages.length.toLocaleString()}개 메시지`;
-    });
-  };
-  reader.readAsText(file, 'UTF-8');
+function readFileAsText(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = ev => resolve(ev.target.result);
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+async function loadFiles(fileList) {
+  const files = Array.from(fileList);
+  document.getElementById('status').textContent = `⏳ ${files.length}개 파일 읽는 중...`;
+  const texts = await Promise.all(files.map(readFileAsText));
+  fetch('/parse', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ texts })
+  })
+  .then(r => r.json())
+  .then(data => {
+    allMessages = data.messages;
+    filteredMessages = allMessages;
+    document.getElementById('statsArea').style.display = '';
+    document.getElementById('searchToggleWrap').style.display = '';
+    renderSenderTags();
+    updateStats();
+    renderResults(allMessages);
+    const names = files.map(f => f.name).join(', ');
+    const dupMsg = data.duplicates_removed ? ` (중복 ${data.duplicates_removed.toLocaleString()}개 제거)` : '';
+    document.getElementById('status').textContent =
+      `✅ ${files.length}개 파일 로드 완료 — ${data.count.toLocaleString()}개 메시지${dupMsg}`;
+    // 프모 정리 자동 오픈
+    openPromoPanel();
+  });
+}
+
+function toggleSearch() {
+  const sec = document.getElementById('searchSection');
+  const btn = document.getElementById('searchToggleBtn');
+  if (sec.style.display === 'none') {
+    sec.style.display = ''; btn.textContent = '🔍 메시지 검색 닫기';
+  } else {
+    sec.style.display = 'none'; btn.textContent = '🔍 메시지 검색 열기';
+  }
 }
 
 function doSearch() {
@@ -697,8 +717,7 @@ let promoBounds = {min:'', max:''};
 
 function openPromoPanel() {
   document.getElementById('promoArea').style.display = '';
-  document.getElementById('results').style.display = 'none';
-  // 기본값: 최근 3개월 (데이터 최대일 기준)
+  // 기본값: 전체 기간 기준 최근 3개월
   fetch('/promo_table', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) })
     .then(r => r.json())
     .then(data => {
@@ -706,14 +725,10 @@ function openPromoPanel() {
       if (promoBounds.max) {
         document.getElementById('promoTo').value = promoBounds.max;
         setQuickRange(3);  // 기본 최근 3개월
+      } else {
+        runPromo();
       }
     });
-  document.getElementById('promoArea').scrollIntoView({behavior:'smooth'});
-}
-
-function closePromoPanel() {
-  document.getElementById('promoArea').style.display = 'none';
-  document.getElementById('results').style.display = '';
 }
 
 function setQuickRange(months) {
@@ -848,9 +863,43 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
 
         if path == '/parse':
-            msgs = parse_kakao_file(body['text'])
-            stored_messages = msgs
-            self._json({'messages': msgs})
+            # 여러 파일 지원: texts(배열) 또는 단일 text
+            texts = body.get('texts')
+            if texts is None:
+                texts = [body['text']]
+
+            # 파일별로 파싱하고, 파일 내 같은 메시지가 여러 번 나오면
+            # (정상 도배) 그 안에서는 순번을 매겨 구분 → 파일 내 중복은 보존
+            per_file = []
+            for t in texts:
+                msgs = parse_kakao_file(t)
+                counter = {}
+                for m in msgs:
+                    base = (m.get('iso', ''), m.get('time', ''), m['sender'], m['content'])
+                    n = counter.get(base, 0)
+                    counter[base] = n + 1
+                    m['_dupkey'] = base + (n,)  # 파일 내 n번째 동일 메시지
+                per_file.append(msgs)
+
+            # 파일 간 중복만 제거: _dupkey가 이미 등장했으면 스킵
+            seen = set()
+            merged = []
+            for msgs in per_file:
+                for m in msgs:
+                    k = m['_dupkey']
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    merged.append(m)
+
+            total_before = sum(len(x) for x in per_file)
+            for m in merged:
+                m.pop('_dupkey', None)
+            merged.sort(key=lambda x: (x.get('iso', ''), x.get('min', 0)))
+            stored_messages = merged
+            self._json({'messages': stored_messages,
+                        'count': len(stored_messages),
+                        'duplicates_removed': total_before - len(merged)})
 
         elif path == '/filter':
             kw = body.get('keyword', '')
