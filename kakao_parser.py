@@ -8,6 +8,9 @@
 import re
 import json
 import os
+import time
+import datetime as _dt
+import urllib.request as _urlreq
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
@@ -205,6 +208,66 @@ def extract_promo_slots(content):
     return results
 
 
+def _shift_iso(iso, days):
+    y, m, d = map(int, iso.split('-'))
+    t = _dt.date(y, m, d) + _dt.timedelta(days=days)
+    return t.isoformat()
+
+
+def _iso_to_kr(iso):
+    y, m, d = map(int, iso.split('-'))
+    return f"{y}년 {m}월 {d}일"
+
+
+def detect_target_iso(content, iso):
+    """
+    공지 내용에서 '적용 날짜'를 판별한다.
+    우선순위: 첫 1~2줄의 명시 날짜(25일, (10/10), 6/2) > 내일/모레 > 공지일 그대로
+    예) 6/1에 "내일 OT 모집합니다" → 6/2로 보정
+    """
+    if not iso:
+        return iso
+    y, mo, d = map(int, iso.split('-'))
+    head = '\n'.join(content.split('\n')[:2])
+
+    # 명시 M/D (예: (10/10), 6/2)
+    m = re.search(r'(\d{1,2})\s*/\s*(\d{1,2})', head)
+    if m:
+        mm, dd = int(m.group(1)), int(m.group(2))
+        if 1 <= mm <= 12 and 1 <= dd <= 31:
+            try:
+                t = _dt.date(y, mm, dd)
+                base = _dt.date(y, mo, d)
+                if (t - base).days < -180:  # 연말→연초 넘어감
+                    t = _dt.date(y + 1, mm, dd)
+                return t.isoformat()
+            except ValueError:
+                pass
+
+    # 명시 N일 (예: 25일(내일,수), 31일 OT 대모집)
+    m = re.search(r'(\d{1,2})일', head)
+    if m:
+        dd = int(m.group(1))
+        if 1 <= dd <= 31:
+            yy, mm = y, mo
+            if dd < d:  # 이미 지난 날짜면 다음 달
+                mm += 1
+                if mm == 13:
+                    mm = 1
+                    yy += 1
+            try:
+                return _dt.date(yy, mm, dd).isoformat()
+            except ValueError:
+                pass
+
+    # 내일/모레
+    if '모레' in content:
+        return _shift_iso(iso, 2)
+    if '내일' in content:
+        return _shift_iso(iso, 1)
+    return iso
+
+
 def build_promo_table(messages, date_from='', date_to='', default_room='SS'):
     """
     프모 OT 수당을 (날짜+시간대) 단위로 정리.
@@ -223,19 +286,24 @@ def build_promo_table(messages, date_from='', date_to='', default_room='SS'):
         if not is_notice_sender(m['sender']):
             continue
         room = m.get('room') or detect_room(m['sender'], m['content'], default_room)
+        target_iso = detect_target_iso(m['content'], iso)
         for s in extract_promo_slots(m['content']):
             raw.append({
-                'iso': iso, 'date': m['date'], 'room': room,
+                'iso': target_iso, 'date': _iso_to_kr(target_iso) if target_iso else m['date'],
+                'room': room,
                 'slot': s['slot'], 'amount': s['amount'], 'people': s['people'],
                 'sender': m['sender'], 'msg_min': m.get('min', 0),
-                'time': f"{m['ampm']} {m['time']}",
+                'notice_iso': iso,
+                'time': (f"{int(iso[5:7])}/{int(iso[8:10])} " if iso and iso != target_iso else '')
+                        + f"{m['ampm']} {m['time']}",
             })
 
-    # 같은 날+방+시간대 → 가장 늦게 공지된 것
+    # 같은 적용일+방+시간대 → 가장 늦게 공지된 것 (공지일+시각 기준)
     latest = {}
     for r in raw:
         key = (r['iso'], r['room'], r['slot'])
-        if key not in latest or r['msg_min'] > latest[key]['msg_min']:
+        rk = (r.get('notice_iso', ''), r['msg_min'])
+        if key not in latest or rk > (latest[key].get('notice_iso', ''), latest[key]['msg_min']):
             latest[key] = r
     rows = sorted(latest.values(), key=lambda x: (x['iso'], x['room'], x['slot']))
     return rows
@@ -438,11 +506,16 @@ HTML = r"""<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <div class="logo">💬</div>
+  <div class="logo">💰</div>
   <div>
-    <h1>카카오톡 대화 분석기</h1>
-    <small>텍스트 파일을 불러와 키워드·날짜별로 검색하세요</small>
+    <h1>카카오톡 프모 수당 분석기</h1>
+    <small>SS / EDP 대화 파일을 올리면 프모 수당을 자동 정리합니다</small>
   </div>
+  <div style="flex:1"></div>
+  <button onclick="shutdownApp()" style="background:rgba(60,30,30,.12);border:1px solid rgba(60,30,30,.3);
+    color:var(--tag);padding:8px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">
+    ⏻ 종료
+  </button>
 </header>
 
 <div class="wrap">
@@ -798,6 +871,15 @@ function exportPromoCsv() {
   );
   download('프모_수당_정리.csv', '\uFEFF' + [header,...lines].join('\n'), 'text/csv');
 }
+
+function shutdownApp() {
+  if (!confirm('프로그램을 종료할까요?')) return;
+  fetch('/shutdown', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .finally(() => {
+      document.body.innerHTML = '<div style="padding:80px 20px;text-align:center;font-family:sans-serif">' +
+        '<div style="font-size:48px">👋</div><h2>종료되었습니다</h2><p style="color:#888">이 창은 닫으셔도 됩니다.</p></div>';
+    });
+}
 </script>
 </body>
 </html>
@@ -899,6 +981,13 @@ class Handler(BaseHTTPRequestHandler):
             bounds = {'min': min(isos), 'max': max(isos)} if isos else {'min': '', 'max': ''}
             self._json({'rows': rows, 'timeline': timeline, 'bounds': bounds})
 
+        elif path == '/shutdown':
+            self._json({'ok': True})
+            def _exit():
+                time.sleep(0.3)
+                os._exit(0)
+            threading.Thread(target=_exit, daemon=True).start()
+
     def _json(self, data):
         payload = json.dumps(data, ensure_ascii=False).encode('utf-8')
         self.send_response(200)
@@ -910,11 +999,28 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     port = 5000
-    server = HTTPServer(('127.0.0.1', port), Handler)
+    # 이전 인스턴스가 떠 있으면 자동 종료 요청
+    try:
+        _urlreq.urlopen(f'http://127.0.0.1:{port}/shutdown', data=b'{}', timeout=2)
+        time.sleep(0.8)
+    except Exception:
+        pass
+    # 포트 바인딩 (그래도 안 되면 5001~5009 시도)
+    server = None
+    for p in range(port, port + 10):
+        try:
+            server = HTTPServer(('127.0.0.1', p), Handler)
+            port = p
+            break
+        except OSError:
+            continue
+    if server is None:
+        print("포트(5000~5009)를 열 수 없습니다. 다른 프로그램을 확인해주세요.")
+        return
     url = f'http://localhost:{port}'
-    print(f"\n✅ 카카오톡 대화 분석기 실행 중")
+    print(f"\n✅ 카카오톡 프모 분석기 실행 중")
     print(f"   브라우저: {url}")
-    print(f"   종료: Ctrl+C\n")
+    print(f"   종료: 화면의 [종료] 버튼 또는 Ctrl+C\n")
     threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()
