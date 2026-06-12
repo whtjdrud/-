@@ -305,7 +305,9 @@ def build_promo_table(messages, date_from='', date_to='', default_room='SS'):
         rk = (r.get('notice_iso', ''), r['msg_min'])
         if key not in latest or rk > (latest[key].get('notice_iso', ''), latest[key]['msg_min']):
             latest[key] = r
-    rows = sorted(latest.values(), key=lambda x: (x['iso'], x['room'], x['slot']))
+    _room_order = {'SS': 0, 'EDP': 1}
+    rows = sorted(latest.values(),
+                  key=lambda x: (x['iso'], _room_order.get(x['room'], 9), x['slot']))
     return rows
 
 
@@ -502,6 +504,33 @@ HTML = r"""<!DOCTYPE html>
   .tl-chip { background:#FFF3CD; color:#5c4a00; border-radius:8px; padding:5px 10px;
              font-size:13px; white-space:nowrap; }
   .tl-chip b { color:#C0392B; }
+
+  /* 프모 표 - 날짜/방 구분선 */
+  .promo-table tr.div-date td {
+    background:#3C1E1E !important; color:#FEE500;
+    font-size:14px; font-weight:800; padding:10px 14px;
+    border-top:3px solid #2A1010 !important;
+  }
+  .promo-table tr.div-room-row td {
+    background:#F5F5F0 !important; padding:6px 14px;
+    border-top:1px solid #DDD !important;
+  }
+  .promo-table .div-room {
+    display:inline-block; padding:2px 10px; border-radius:12px;
+    font-size:11px; font-weight:700; margin-left:8px;
+    background:#FEE500; color:#3C1E1E;
+  }
+  .promo-table .div-room.edp { background:#E3F2FD; color:#1565C0; }
+  .promo-table tr.row-ss td { background:#FFFEF6; }
+  .promo-table tr.row-edp td { background:#F5FAFE; }
+  .promo-table tr.row-ss:hover td { background:#FFF8DC; }
+  .promo-table tr.row-edp:hover td { background:#E8F4FD; }
+
+  .tl-room-block { margin-top:10px; padding-top:8px; border-top:1px dashed #E8E8E0; }
+  .tl-room-block:first-of-type { border-top:none; margin-top:0; padding-top:0; }
+  .tl-room-label { margin-bottom:6px; }
+  .tl-chip-edp { background:#E3F2FD; color:#1A4060; }
+  .tl-chip-edp b { color:#0D47A1; }
 </style>
 </head>
 <body>
@@ -815,10 +844,21 @@ function renderPromoTable(rows) {
     return;
   }
   let html = '<thead><tr><th>날짜</th><th>방</th><th>시간대</th><th>인원</th><th>프모 수당</th><th>최종공지</th><th>공지자</th></tr></thead><tbody>';
+  let lastDate = null, lastRoom = null;
   for (const r of rows) {
+    const dateChanged = r.date !== lastDate;
+    const roomChanged = dateChanged || r.room !== lastRoom;
+    // 날짜가 바뀌면: 굵은 날짜 헤더 행 + 방 라벨
+    if (dateChanged) {
+      html += `<tr class="div-date"><td colspan="7">📅 ${escHtml(r.date)} <span class="div-room ${r.room.toLowerCase()}">${escHtml(r.room)}방</span></td></tr>`;
+    } else if (roomChanged) {
+      // 같은 날 안에서 방만 바뀜
+      html += `<tr class="div-room-row"><td colspan="7"><span class="div-room ${r.room.toLowerCase()}">${escHtml(r.room)}방</span></td></tr>`;
+    }
+    lastDate = r.date; lastRoom = r.room;
     const ppl = r.people ? r.people + '명' : '<span class="ch-empty">제한없음</span>';
-    html += `<tr>
-      <td style="white-space:nowrap">${escHtml(r.date)}</td>
+    html += `<tr class="row-${r.room.toLowerCase()}">
+      <td style="color:#aaa;font-size:11px">·</td>
       <td><span class="ch-badge">${escHtml(r.room)}</span></td>
       <td style="white-space:nowrap">${escHtml(r.slot)}</td>
       <td style="text-align:center">${ppl}</td>
@@ -839,17 +879,29 @@ function renderPromoTimeline(timeline) {
   }
   let html = '';
   for (const day of timeline) {
+    // 방별로 그룹핑 (SS 우선, EDP 그 다음)
+    const byRoom = {SS:[], EDP:[]};
+    for (const s of day.slots) {
+      if (byRoom[s.room]) byRoom[s.room].push(s); else (byRoom[s.room]=[s]);
+    }
     html += `<div class="tl-day">
       <div class="tl-head">
         <span class="tl-date">📅 ${escHtml(day.date)}</span>
-        <span class="tl-meta">${day.count}개 시간대 · ${escHtml(day.amounts)} · ${escHtml(day.rooms)}</span>
-      </div>
-      <div class="tl-slots">`;
-    for (const s of day.slots) {
-      const ppl = s.people ? ` ${s.people}명` : '';
-      html += `<span class="tl-chip">${escHtml(s.slot)}<b> ${s.amount.toLocaleString()}원</b>${ppl}</span>`;
+        <span class="tl-meta">${day.count}개 시간대 · ${escHtml(day.amounts)}</span>
+      </div>`;
+    for (const room of ['SS','EDP']) {
+      const slots = byRoom[room] || [];
+      if (!slots.length) continue;
+      html += `<div class="tl-room-block">
+        <div class="tl-room-label"><span class="div-room ${room.toLowerCase()}">${room}방</span> <span style="color:#999;font-size:11px">${slots.length}개 시간대</span></div>
+        <div class="tl-slots">`;
+      for (const s of slots) {
+        const ppl = s.people ? ` ${s.people}명` : '';
+        html += `<span class="tl-chip tl-chip-${room.toLowerCase()}">${escHtml(s.slot)}<b> ${s.amount.toLocaleString()}원</b>${ppl}</span>`;
+      }
+      html += `</div></div>`;
     }
-    html += `</div></div>`;
+    html += `</div>`;
   }
   c.innerHTML = html;
 }
