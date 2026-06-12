@@ -305,6 +305,36 @@ def build_promo_table(messages, date_from='', date_to='', default_room='SS'):
         rk = (r.get('notice_iso', ''), r['msg_min'])
         if key not in latest or rk > (latest[key].get('notice_iso', ''), latest[key]['msg_min']):
             latest[key] = r
+    # 같은 적용일+방+금액에서, 긴 시간대(2시간 이상)가 1시간 단위 시간대들로
+    # 완전히 덮이면 긴 쪽 제거 (예: 18~22시 == 18~19,19~20,20~21,21~22)
+    def _parse_slot(slot):
+        a, b = slot.split('~')
+        ah, am = map(int, a.split(':'))
+        bh, bm = map(int, b.split(':'))
+        return ah*60+am, bh*60+bm
+    # 같은 (iso, room, amount) 그룹별로 처리
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for k, r in latest.items():
+        groups[(r['iso'], r['room'], r['amount'])].append(k)
+    to_remove = set()
+    for key, ks in groups.items():
+        slots = [(k, _parse_slot(k[2])) for k in ks]
+        # 1시간 단위 슬롯들 모음
+        hour_starts = set()
+        for k, (s, e) in slots:
+            if e - s == 60:
+                hour_starts.add(s)
+        # 긴 슬롯이 1시간 단위들로 완전히 덮이면 제거
+        for k, (s, e) in slots:
+            if e - s <= 60:
+                continue
+            covered = all(h in hour_starts for h in range(s, e, 60))
+            if covered:
+                to_remove.add(k)
+    for k in to_remove:
+        del latest[k]
+
     _room_order = {'SS': 0, 'EDP': 1}
     rows = sorted(latest.values(),
                   key=lambda x: (x['iso'], _room_order.get(x['room'], 9), x['slot']))
