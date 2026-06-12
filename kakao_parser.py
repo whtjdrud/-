@@ -137,7 +137,28 @@ def has_promo(s):
 def is_notice_sender(sender):
     return any(k in sender for k in NOTICE_KW)
 
+def detect_room_by_majority(messages):
+    """
+    파일(메시지 묶음) 전체 발신자명을 보고 다수결로 방을 정한다.
+    관리자(SS 소속)가 EDP방에 섞여 있어도, 대다수가 EDP면 EDP방으로 판정.
+    """
+    ss = edp = 0
+    for m in messages:
+        name = m['sender'].lower()
+        if 'edp' in name:
+            edp += 1
+        elif 'ss' in name:
+            ss += 1
+    if edp > ss:
+        return 'EDP'
+    if ss > edp:
+        return 'SS'
+    # 동률/불명: 첫 줄 메타나 내용으로 보조 판단은 호출부에서
+    return ''
+
+
 def detect_room(sender, content, default_room='SS'):
+    """단일 메시지 기준(보조용). 기본은 파일 다수결을 우선 사용."""
     s = (sender + ' ' + content).lower()
     if 'edp' in s:
         return 'EDP'
@@ -201,7 +222,7 @@ def build_promo_table(messages, date_from='', date_to='', default_room='SS'):
             continue
         if not is_notice_sender(m['sender']):
             continue
-        room = detect_room(m['sender'], m['content'], default_room)
+        room = m.get('room') or detect_room(m['sender'], m['content'], default_room)
         for s in extract_promo_slots(m['content']):
             raw.append({
                 'iso': iso, 'date': m['date'], 'room': room,
@@ -481,55 +502,7 @@ HTML = r"""<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- 검색 (접이식, 아래) -->
-  <div id="searchToggleWrap" style="display:none;margin-top:24px">
-    <button class="btn btn-ghost" onclick="toggleSearch()" id="searchToggleBtn">🔍 메시지 검색 열기</button>
-  </div>
-
-  <div id="searchSection" style="display:none">
-    <div class="panel" id="filterPanel">
-      <h2>🔍 검색 필터</h2>
-      <div class="filters">
-        <div class="field">
-          <label>키워드</label>
-          <input id="kw" placeholder="예: OT, 프로모션, 일정" />
-        </div>
-        <div class="field">
-          <label>보낸 사람</label>
-          <input id="senderInput" placeholder="이름 입력 또는 아래 태그 클릭" />
-        </div>
-        <div class="field">
-          <label>시작 날짜 (예: 2024년 3월 1일)</label>
-          <input id="dateFrom" placeholder="2024년 3월 1일" />
-        </div>
-        <div class="field">
-          <label>종료 날짜</label>
-          <input id="dateTo" placeholder="2024년 12월 31일" />
-        </div>
-      </div>
-      <div class="actions">
-        <button class="btn btn-primary" onclick="doSearch()">검색</button>
-        <button class="btn btn-ghost" onclick="clearFilters()">초기화</button>
-      </div>
-    </div>
-
-    <div id="statsArea" style="display:none">
-      <div class="stats">
-        <div class="stat-card"><div class="num" id="totalCount">0</div><div class="lbl">전체 메시지</div></div>
-        <div class="stat-card"><div class="num" id="resultCount">0</div><div class="lbl">검색 결과</div></div>
-        <div class="stat-card"><div class="num" id="senderCount">0</div><div class="lbl">참여자</div></div>
-        <div class="stat-card"><div class="num" id="dayCount">0</div><div class="lbl">대화 일수</div></div>
-      </div>
-      <div class="senders" id="senderTags"></div>
-      <div class="export-bar">
-        <span>내보내기:</span>
-        <button class="btn btn-ghost" onclick="exportTxt()">📄 TXT</button>
-        <button class="btn btn-ghost" onclick="exportCsv()">📊 CSV</button>
-      </div>
-    </div>
-    <div id="synonymHint" style="display:none;margin-bottom:12px;font-size:13px;color:#888;"></div>
-    <div id="results"></div>
-  </div>
+  <!-- 검색 기능 제거: 프모 수당 정리 전용 -->
 </div>
 
 <script>
@@ -568,30 +541,17 @@ async function loadFiles(fileList) {
   .then(r => r.json())
   .then(data => {
     allMessages = data.messages;
-    filteredMessages = allMessages;
-    document.getElementById('statsArea').style.display = '';
-    document.getElementById('searchToggleWrap').style.display = '';
-    renderSenderTags();
-    updateStats();
-    renderResults(allMessages);
-    const names = files.map(f => f.name).join(', ');
-    const dupMsg = data.duplicates_removed ? ` (중복 ${data.duplicates_removed.toLocaleString()}개 제거)` : '';
-    document.getElementById('status').textContent =
-      `✅ ${files.length}개 파일 로드 완료 — ${data.count.toLocaleString()}개 메시지${dupMsg}`;
-    // 프모 정리 자동 오픈
+    const dupMsg = data.duplicates_removed ? ` · 중복 ${data.duplicates_removed.toLocaleString()}개 제거` : '';
+    const roomMsg = (data.rooms || []).map((r,i) => `${files[i] ? files[i].name : '파일'+ (i+1)} → ${r.room}방`).join(' / ');
+    document.getElementById('status').innerHTML =
+      `✅ ${files.length}개 파일 · ${data.count.toLocaleString()}개 메시지${dupMsg}<br>` +
+      `<span style="color:#888;font-size:12px">${roomMsg}</span>`;
+    // 프모 정리 자동 실행 (최근 1개월)
     openPromoPanel();
   });
 }
 
-function toggleSearch() {
-  const sec = document.getElementById('searchSection');
-  const btn = document.getElementById('searchToggleBtn');
-  if (sec.style.display === 'none') {
-    sec.style.display = ''; btn.textContent = '🔍 메시지 검색 닫기';
-  } else {
-    sec.style.display = 'none'; btn.textContent = '🔍 메시지 검색 열기';
-  }
-}
+function toggleSearch() { /* 검색 기능 제거됨 */ }
 
 function doSearch() {
   const kw = document.getElementById('kw').value.trim();
@@ -724,7 +684,7 @@ function openPromoPanel() {
       promoBounds = data.bounds || {min:'',max:''};
       if (promoBounds.max) {
         document.getElementById('promoTo').value = promoBounds.max;
-        setQuickRange(3);  // 기본 최근 3개월
+        setQuickRange(1);  // 기본 최근 1개월
       } else {
         runPromo();
       }
@@ -868,20 +828,35 @@ class Handler(BaseHTTPRequestHandler):
             if texts is None:
                 texts = [body['text']]
 
-            # 파일별로 파싱하고, 파일 내 같은 메시지가 여러 번 나오면
-            # (정상 도배) 그 안에서는 순번을 매겨 구분 → 파일 내 중복은 보존
+            # 파일별로 파싱 + 방 판정(다수결 + 첫 줄 메타 보조)
             per_file = []
+            room_summary = []
             for t in texts:
                 msgs = parse_kakao_file(t)
+                # 방 판정: 발신자 다수결 우선
+                room = detect_room_by_majority(msgs)
+                if not room:
+                    # 보조: 첫 줄 "Meta Ss/Edp ..." 확인
+                    first = t.replace('\r\n', '\n').split('\n', 1)[0].lower()
+                    if 'edp' in first:
+                        room = 'EDP'
+                    elif 'ss' in first:
+                        room = 'SS'
+                    else:
+                        room = 'SS'
+                for m in msgs:
+                    m['room'] = room
+                room_summary.append({'room': room, 'count': len(msgs)})
+                # 파일 내 동일 메시지 도배 보존용 순번
                 counter = {}
                 for m in msgs:
-                    base = (m.get('iso', ''), m.get('time', ''), m['sender'], m['content'])
+                    base = (room, m.get('iso', ''), m.get('time', ''), m['sender'], m['content'])
                     n = counter.get(base, 0)
                     counter[base] = n + 1
-                    m['_dupkey'] = base + (n,)  # 파일 내 n번째 동일 메시지
+                    m['_dupkey'] = base + (n,)
                 per_file.append(msgs)
 
-            # 파일 간 중복만 제거: _dupkey가 이미 등장했으면 스킵
+            # 파일 간 중복만 제거 (방까지 같은 완전 동일 메시지)
             seen = set()
             merged = []
             for msgs in per_file:
@@ -899,7 +874,8 @@ class Handler(BaseHTTPRequestHandler):
             stored_messages = merged
             self._json({'messages': stored_messages,
                         'count': len(stored_messages),
-                        'duplicates_removed': total_before - len(merged)})
+                        'duplicates_removed': total_before - len(merged),
+                        'rooms': room_summary})
 
         elif path == '/filter':
             kw = body.get('keyword', '')
